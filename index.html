@@ -1109,7 +1109,9 @@
   function renderMute() { $('muteBtn').innerHTML = muteIcon(); $('muteBtn').setAttribute('aria-label', muted ? 'Turn sound on' : 'Mute sound'); }
 
   // ---------- leaderboard ----------
-  let boardDb = null, playerId = null, canPost = true, boardRows = [], myRow = null, boardFrom = 'titleScreen', boardLoaded = false;
+  // Public site's score database (the Claude page uses its own store instead). The key is the public one, safe to ship.
+  const SB = { url: 'https://znvttcbiagjjnuifwwdd.supabase.co', key: 'sb_publishable_XXNZ51ml2n105yblTQIcfA_mC8i6bW3' };
+  let boardApi = null, playerId = null, canPost = true, boardRows = [], myRow = null, boardFrom = 'titleScreen', boardLoaded = false;
   let posting = Promise.resolve();
   let bestLevel = store.get('dls-best-level', 0) || 0;
   const VIEW_ONLY = "You can see the scores, but your access can't add one. Ask the game's owner to invite you as an Editor.";
@@ -1147,8 +1149,8 @@
   }
   function renderRank() {
     let text = '';
-    if (boardDb && !canPost) text = "Score not posted: view-only access";
-    else if (boardDb && myRow) {
+    if (boardApi && !canPost) text = "Score not posted: view-only access";
+    else if (boardApi && myRow) {
       const i = boardRows.findIndex((r) => r.id === playerId);
       text = i >= 0 ? `You're #${i + 1} on the leaderboard` : (boardLoaded ? 'Outside the top 50 for now' : '');
     }
@@ -1157,24 +1159,29 @@
   function boardWriteFailed(e) {
     const code = e && e.code;
     if (code === 'invalid_argument' || code === 'not_granted' || code === 'revoked') { canPost = false; $('nameForm').hidden = true; boardStatus(VIEW_ONLY); }
+    else if (code === 'name_not_allowed') {
+      store.set('dls-name', ''); $('nameInput').value = myName();
+      boardStatus("That name isn't allowed, so you're back to a default name.");
+      if (myRow) { myRow = Object.assign({}, myRow, { name: myName() }); queueWrite(myRow); }
+    }
     else if (code === 'quota_exceeded') boardStatus('The leaderboard is full, so this score could not be saved.');
     else { myRow = null; boardStatus("Couldn't reach the leaderboard. Your score will post after your next run."); }
     renderRank();
   }
   function queueWrite(row) {
-    const ref = boardDb.collection('scores').doc(playerId);
     posting = posting.then(async () => {
-      try { await ref.set(row); }
+      try { await boardApi.save(row); }
       catch (e) {
         if (!e || e.code !== 'unavailable') throw e;
-        await new Promise((r) => setTimeout(r, rand(600, 1500)));
-        await ref.set(row);
+        await new Promise((r) => setTimeout(r, rand(1100, 1800)));
+        await boardApi.save(row);
       }
+      boardApi.refresh();
     }).catch(boardWriteFailed);
   }
   function afterRun(isBest) {
     if (isBest) { bestLevel = level; store.set('dls-best-level', level); }
-    if (boardDb && playerId && canPost && best > 0 && !(myRow && myRow.score >= best)) {
+    if (boardApi && playerId && canPost && best > 0 && !(myRow && myRow.score >= best)) {
       myRow = { name: myName(), score: Math.floor(best), level: bestLevel || level, at: Date.now() };
       queueWrite(myRow);
     }
@@ -1184,6 +1191,7 @@
     boardFrom = SCREENS.find((s) => !$(s).hidden) || 'titleScreen';
     $('nameInput').value = myName();
     renderBoard(); show('boardScreen'); $('boardBack').focus();
+    boardApi.refresh();
   }
   $('boardBack').addEventListener('click', () => { show(boardFrom); });
   document.querySelectorAll('.boardLink').forEach((b) => b.addEventListener('click', openBoard));
@@ -1195,15 +1203,58 @@
     if (myRow && myRow.name !== n && canPost) { myRow = Object.assign({}, myRow, { name: n }); queueWrite(myRow); }
     boardStatus('Name saved.');
   });
-  async function initBoard() {
-    if (!window.claude || !window.claude.use) return;
+  const showBoardLinks = () => document.querySelectorAll('.boardLink').forEach((e) => { e.hidden = false; });
+  function initBoard() {
+    if (window.claude && window.claude.use) initClaudeBoard();
+    else if (SB.url && SB.key) initWebBoard();
+  }
+  async function sbCall(fn, body) {
+    const headers = { apikey: SB.key, 'Content-Type': 'application/json' };
+    if (SB.key.startsWith('eyJ')) headers.Authorization = 'Bearer ' + SB.key;
+    let res;
+    try { res = await fetch(SB.url.replace(/\/$/, '') + '/rest/v1/rpc/' + fn, { method: 'POST', headers, body: JSON.stringify(body) }); }
+    catch (e) { throw { code: 'unavailable' }; }
+    if (res.ok) return res.status === 204 ? null : res.json();
+    const msg = await res.text().catch(() => '');
+    throw { code: /name_not_allowed/.test(msg) ? 'name_not_allowed' : /slow_down/.test(msg) ? 'unavailable' : 'failed' };
+  }
+  function playerSecret() {
+    let s = store.get('dls-secret', '');
+    if (!s) { s = Array.from(crypto.getRandomValues(new Uint8Array(18)), (b) => b.toString(16).padStart(2, '0')).join(''); store.set('dls-secret', s); }
+    return s;
+  }
+  function initWebBoard() {
+    playerId = localPlayerId();
+    myRow = store.get('dls-my-row', null);
+    async function refresh() {
+      try {
+        const data = await sbCall('get_leaderboard', {});
+        if (!boardLoaded) { boardLoaded = true; boardStatus(''); }
+        boardRows = (data || []).map((r) => parseRow({ id: r.player_id, data: () => r })).filter(Boolean);
+        renderBoard();
+      } catch (e) { if (!boardLoaded) boardStatus("Can't reach the leaderboard right now."); }
+    }
+    boardApi = {
+      refresh,
+      save: async (row) => {
+        await sbCall('submit_score', { p_player: playerId, p_secret: playerSecret(), p_name: row.name, p_score: row.score, p_level: row.level });
+        store.set('dls-my-row', row);
+      },
+    };
+    showBoardLinks();
+    refresh();
+    setInterval(() => { if (!$('boardScreen').hidden) refresh(); }, 30000);
+  }
+  async function initClaudeBoard() {
+    let boardDb = null;
     try { boardDb = await window.claude.use('db'); } catch (e) { boardDb = null; }
     if (!boardDb) return;
+    boardApi = { save: (row) => boardDb.collection('scores').doc(playerId).set(row), refresh: () => {} };
     let user = null;
     try { user = await window.claude.use('user'); } catch (e) {}
     playerId = (user && (await user.id())) || localPlayerId();
     if (user && (await user.can('data.write')) === false) { canPost = false; $('nameForm').hidden = true; boardStatus(VIEW_ONLY); }
-    document.querySelectorAll('.boardLink').forEach((e) => { e.hidden = false; });
+    showBoardLinks();
     try {
       const mine = await boardDb.collection('scores').doc(playerId).get();
       if (mine.exists) { const r = parseRow(mine); if (r) myRow = { name: r.name, score: r.score, level: r.level, at: mine.data().at || 0 }; }
