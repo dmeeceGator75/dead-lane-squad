@@ -47,7 +47,7 @@
     text-shadow: 0 2px 0 var(--o), 2px 0 0 var(--o), -2px 0 0 var(--o), 0 -2px 0 var(--o), 2px 2px 0 var(--o), -2px 2px 0 var(--o), 2px -2px 0 var(--o), -2px -2px 0 var(--o), 0 4px 0 var(--o);
   }
   .lb.z > span { font-size: 24px; }
-  .lb.z.big > span { font-size: 30px; color: #ffd0d0; }
+  .lb.z.brute > span { font-size: 30px; color: #ffd0d0; }
   .lb.gate > span { font-size: 38px; }
   .lb.gate.good > span { --o: #13663a; }
   .lb.gate.bad > span { --o: #8a1d33; }
@@ -757,7 +757,7 @@
     const mesh = makeZombieMesh(kind); mesh.position.x = LANES[lane] + rand(-0.3, 0.3);
     const o = { cat: 'zombie', kind, lane, mesh, hp, maxHp: hp, depth: kind === 'brute' ? 0.7 : 0.45, ph: rand(0, 6),
       walk: kind === 'runner' ? 4.5 : kind === 'brute' ? 0.8 : 1.6, list: lookable(mesh), look: 'normal', flashT: 0,
-      label: makeLabel(kind === 'brute' ? 'z big' : 'z', String(hp)), ly: kind === 'brute' ? 2.75 : kind === 'runner' ? 1.7 : 1.95 };
+      label: makeLabel(kind === 'brute' ? 'z brute' : 'z', String(hp)), ly: kind === 'brute' ? 2.75 : kind === 'runner' ? 1.7 : 1.95 };
     mesh.rotation.y = rand(-0.15, 0.15);
     return addObj(o, z + rand(-1, 1));
   }
