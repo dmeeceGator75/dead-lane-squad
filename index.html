@@ -708,6 +708,10 @@
   const E = (p) => (1 + 22 * p) * (1 + 2.3 * p);
   const Lm = () => 1 + 0.35 * (level - 1);
   const Lg = () => 1 + 0.25 * (level - 1);
+  // Guns get 7% stronger per level up to level 10, so later levels stay hard but reachable.
+  const Gb = (n = level) => 1 + 0.07 * (Math.min(n, 10) - 1);
+  const boostText = (n = level) => '+' + Math.round((Gb(n) - 1) * 100) + '%';
+  const gunLabel = () => GUNS[S.gun].name + (level > 1 ? ' ' + boostText() : '');
   const prog = () => clamp(dist / levelLen, 0, 1);
   const nearestLane = () => { let b = 0; for (let i = 1; i < 3; i++) if (Math.abs(LANES[i] - S.x) < Math.abs(LANES[b] - S.x)) b = i; return b; };
   const score = () => Math.floor(dist) + killPts;
@@ -913,7 +917,7 @@
       syncSquad(); if (S.men <= 0) gameOver();
     } else if (o.cat === 'gun') {
       o.dead = true; removeObj(o);
-      S.gun = Math.max(S.gun, o.gun); setGunLook(); $('gunChip').textContent = GUNS[S.gun].name;
+      S.gun = Math.max(S.gun, o.gun); setGunLook(); $('gunChip').textContent = gunLabel();
       popText(S.x, 2.6, 0, GUNS[S.gun].name + '!', 'good'); spawnParticles(S.x, 1.2, 0, 0xffd23f, 18); sfx.gun();
     } else if (o.cat === 'orb') {
       o.dead = true; removeObj(o);
@@ -935,7 +939,7 @@
     S.fireT += 1 / gn.rate; if (S.fireT < 0) S.fireT = 0;
     const lane = nearestLane(), pel = gn.pellets || 1;
     const num = Math.min(12, Math.min(S.men, 6) * pel);
-    const dmg = (S.men * gn.dps) / gn.rate / num, inc = (2 + 0.6 * S.gun) / (gn.rate * num);
+    const dmg = (S.men * gn.dps * Gb()) / gn.rate / num, inc = (2 + 0.6 * S.gun) / (gn.rate * num);
     for (let i = 0; i < num; i++) {
       const m = members[i % Math.max(1, members.length)];
       const ox = m ? m.position.x + 0.1 : 0, oz = m ? m.position.z : 0;
@@ -1299,9 +1303,10 @@
     S.lane = 1; S.x = 0; S.men = 1; S.gun = 0; S.fireT = 0; S.hurt = 0; maxMen = 1;
     while (members.length) squad.remove(members.pop());
     syncSquad(); setGunLook();
-    $('gunChip').textContent = GUNS[0].name;
+    $('gunChip').textContent = gunLabel();
     $('prog').classList.remove('boss'); $('progLabel').textContent = 'Level ' + level;
     mode = 'play'; show(null); lastScore = -1; lastFill = ''; updateHud(); sfx.click(); requestWake();
+    if (level > 1) popText(0, 3, -7, 'Guns ' + boostText() + '!', 'good');
   }
   function pause() { if (mode !== 'play') return; mode = 'pause'; show('pauseScreen'); $('resumeBtn').focus(); }
   function resume() { if (mode !== 'pause') return; audio(); mode = 'play'; show(null); sfx.click(); }
@@ -1326,7 +1331,8 @@
     $('winTitle').textContent = `Level ${level} cleared!`;
     $('winScore').textContent = score().toLocaleString();
     $('winBest').hidden = !isBest;
-    $('winStats').textContent = `${kills} zombies down · biggest squad ${maxMen} · ${fmtTime(levelT)}`;
+    $('winStats').textContent = `${kills} zombies down · biggest squad ${maxMen} · ${fmtTime(levelT)}` +
+      (level < 10 ? ` · guns ${boostText(level + 1)} next level` : '');
     $('nextBtn').textContent = `Play level ${level + 1}`;
     show('winScreen'); $('nextBtn').focus();
   }
